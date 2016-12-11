@@ -11,7 +11,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/st3v/go-eureka/retry"
+	"github.com/virajago/go-scs-eureka/retry"
 )
 
 var _ = Describe("client options", func() {

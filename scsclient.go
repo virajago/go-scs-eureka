@@ -8,6 +8,7 @@ import (
   "crypto/tls"
   "strconv"
   "time"
+  "errors"
 )
 
 type CFApp struct {
@@ -51,7 +52,7 @@ func getAppInstanceInfo() (*CFApp, *Instance, error) {
   fmt.Println("VCAP APPLICATION",VCAPApplicationEnv)
 
   if err = json.Unmarshal([]byte(VCAPApplicationEnv), app); err != nil {
-    panic(err)
+    return nil,nil,err
   }
 
   fmt.Println("ApplID",app.ID)
@@ -92,9 +93,13 @@ func getServiceInfo() (*CFService,error){
   fmt.Println("VCAP SERVICES",VCAPServicesEnv)
 
   if err := json.Unmarshal([]byte(VCAPServicesEnv), &services); err != nil {
-  panic(err)
+    return nil,err
   }
   fmt.Println(services)
+  if services[ServiceRegistry] == nil {
+    //fmt.Println("Error: Service Registry not bound to application")
+    return nil, errors.New("Service Registry not bound to application")
+  }
   registryCred := services[ServiceRegistry].([]interface{})[0].(map[string]interface{})["credentials"].(map[string]interface{})
   service.ServerURI = registryCred["uri"].(string)+"/eureka"
   service.ClientSecret = registryCred["client_secret"].(string)
@@ -109,11 +114,12 @@ func getServiceInfo() (*CFService,error){
   return service,nil
 }
 
-func GetClientSCS(skip_ssl bool) *Client {
+func GetClientSCS(skip_ssl bool) (*Client,error){
 
   serviceCred,err := getServiceInfo()
   if err!=nil {
-    fmt.Println("Error getting CF Service Inst env",err)
+    //fmt.Println("Error getting CF Service Inst env",err)
+    return nil,err
   }
 
   oAuth2Options := Oauth2ClientCredentials(serviceCred.ClientID, serviceCred.ClientSecret, serviceCred.TokenURI)
@@ -125,11 +131,8 @@ func GetClientSCS(skip_ssl bool) *Client {
   c := NewClient([]string{serviceCred.ServerURI},oAuth2Options,tlsOption)
 
   if c==nil {
-    errMsg := "Error creating HTTP client"
-    fmt.Println(errMsg)
-    return nil
+    return nil,errors.New("Failed to create HTTP client")
   }
-
   //Use this block to test successful connectivity to SCS server
   /*regApps,err:=c.Apps()
   if err!=nil {
@@ -139,24 +142,27 @@ func GetClientSCS(skip_ssl bool) *Client {
   fmt.Println("No of apps: ",len(regApps))
   */
 
-  return c
+  return c,nil
 }
 
 func RegisterSCS(skip_ssl bool) error {
   fmt.Println("Getting HTTP Client for SCS")
 
-  c:=GetClientSCS(skip_ssl)
+  c,err:=GetClientSCS(skip_ssl)
+  if err!=nil {
+    //fmt.Println("Error getting CF app env",err)
+    return err
+  }
 
+  fmt.Println("Getting CF app info")
   _,regInstance,err:=getAppInstanceInfo()
   if err!=nil {
-    fmt.Println("Error getting CF app env",err)
     return err
   }
 
   fmt.Println("Registering application",regInstance.AppName,"/",regInstance.ID)
   err= c.Register(regInstance)
   if err!=nil {
-    fmt.Println("Error registering app:",err)
     return err
   }
 
@@ -166,11 +172,16 @@ func RegisterSCS(skip_ssl bool) error {
 func SendHearbeatSCS(skip_ssl bool) {
   fmt.Println("Getting HTTP Client for SCS")
 
-  c:=GetClientSCS(skip_ssl)
+  c,err:=GetClientSCS(skip_ssl)
+  if err!=nil {
+    fmt.Println("Error:",err)
+    return
+  }
 
+  fmt.Println("Getting CF app info")
   _,regInstance,err:=getAppInstanceInfo()
   if err!=nil {
-    fmt.Println("Error getting CF app env",err)
+    fmt.Println("Error:",err)
     return
   }
 
@@ -178,10 +189,9 @@ func SendHearbeatSCS(skip_ssl bool) {
     fmt.Println("Sending Heartbeat for",regInstance.AppName,"/",regInstance.ID)
     err = c.Heartbeat(regInstance)
     if err!=nil {
-      fmt.Println("Error sending Heartbeat:",err)
+      fmt.Println("Error:",err)
       return
     }
     time.Sleep(time.Second * 30)
   }
-
 }

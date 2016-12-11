@@ -13,7 +13,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 
-	"github.com/st3v/go-eureka/retry"
+	"github.com/virajago/go-scs-eureka/retry"
 )
 
 type Client struct {

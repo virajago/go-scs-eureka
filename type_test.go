@@ -9,7 +9,7 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 
-	"github.com/st3v/go-eureka"
+	"github.com/virajago/go-scs-eureka"
 )
 
 var _ = Describe("Instance", func() {

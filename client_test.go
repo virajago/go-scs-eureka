@@ -12,8 +12,8 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/ghttp"
 
-	"github.com/st3v/go-eureka"
-	"github.com/st3v/go-eureka/retry"
+	"github.com/virajago/go-scs-eureka"
+	"github.com/virajago/go-scs-eureka/retry"
 )
 
 var _ = Describe("client", func() {
