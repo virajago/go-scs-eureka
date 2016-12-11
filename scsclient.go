@@ -1,33 +1,187 @@
-package scseureka
+package eureka
 
 import (
   "fmt"
-  //"encoding/xml"
-  //"crypto/tls"
+  "os"
+  "encoding/json"
+  "encoding/xml"
+  "crypto/tls"
+  "strconv"
+  "time"
 )
 
-func Register(scsInstance string) error {
-  fmt.Println("Registering to SCS")
-  /*
-  serverURI:= []string{"https://eureka-9325402d-e8e0-49e6-95eb-35d877be7be8.apps.pcf.thy.com/eureka"}
-  clientSecret := "F0MDnbdI26VW"
-  clientID := "p-service-registry-df85da3d-c536-45bb-9351-d535a3b32035"
-  tokenURI := "https://p-spring-cloud-services.uaa.system.pcf.thy.com/oauth/token"
+type CFApp struct {
+		ID   string `json:"application_id"`
+		Name string `json:"application_name"`
+    URIs []string `json:"application_uris"`
+    Port uint16
+    IPAddr string
+    InstanceID string
+    Hostname string
+}
 
-  oAuth2Options:= eureka.Oauth2ClientCredentials(clientID, clientSecret, tokenURI)
-  tlsconfig:= eureka.TLSConfig(&tls.Config{InsecureSkipVerify: true})
+type CFService struct {
+		ServerURI string
+    ClientSecret string
+    ClientID string
+    TokenURI string
+}
 
-  c:=eureka.NewClient(serverURI,oAuth2Options,tlsconfig)
+const (
+    ServiceRegistry = "p-service-registry"
+)
 
+func getAppInstanceInfo() (*CFApp, *Instance, error) {
 
+  app:= new(CFApp)
+  regInstance:= new(Instance)
+  p,err := strconv.ParseUint(os.Getenv("PORT"),10,16)
+  app.Port = uint16(p)
+  app.IPAddr= os.Getenv("CF_INSTANCE_IP")
+  app.InstanceID = os.Getenv("CF_INSTANCE_GUID")
+  //hostname := os.Getenv("CF_INSTANCE_ADDR")
+  app.Hostname = app.IPAddr+":"+os.Getenv("PORT")
 
+  VCAPApplicationEnv := os.Getenv("VCAP_APPLICATION")
 
-	data, err := xml.Marshal(instance)
-	if err != nil {
-		return err
-	}
+  fmt.Println("VCAP port",app.Port)
+  fmt.Println("VCAP IPAddr",app.IPAddr)
+  fmt.Println("VCAP instanceID",app.InstanceID)
+  fmt.Println("Hostname",app.Hostname)
+  fmt.Println("VCAP APPLICATION",VCAPApplicationEnv)
 
-	return c.retry(c.do("POST", c.appPath(instance.AppName), data, http.StatusNoContent))
-  */
+  if err = json.Unmarshal([]byte(VCAPApplicationEnv), app); err != nil {
+    panic(err)
+  }
+
+  fmt.Println("ApplID",app.ID)
+  fmt.Println("ApplName",app.Name)
+  fmt.Println("ApplURI",app.URIs[0])
+  fmt.Println("Hostname",app.Hostname)
+
+  regInstance = &Instance{
+      XMLName:        xml.Name{Local: "instance"},
+      ID:             app.InstanceID,
+      HostName:       app.Hostname,
+      AppName:        app.Name,
+      IPAddr:         app.IPAddr,
+      VIPAddr:        app.IPAddr,
+      SecureVIPAddr:  app.IPAddr,
+      Status:         StatusUp,
+      StatusOverride: StatusUnknown,
+      Port:           Port(app.Port),
+      SecurePort:     Port(app.Port),
+      HomePageURL:    app.URIs[0],
+      StatusPageURL:  app.URIs[0]+"/status",
+      HealthCheckURL: app.URIs[0]+"/health",
+      DataCenterInfo: DataCenter{
+        Type: DataCenterTypePrivate,
+      },
+  }
+
+  return app,regInstance,nil
+
+}
+
+func getServiceInfo() (*CFService,error){
+
+  var services map[string]interface{}
+  service:= new(CFService)
+
+  VCAPServicesEnv := os.Getenv("VCAP_SERVICES")
+  fmt.Println("VCAP SERVICES",VCAPServicesEnv)
+
+  if err := json.Unmarshal([]byte(VCAPServicesEnv), &services); err != nil {
+  panic(err)
+  }
+  fmt.Println(services)
+  registryCred := services[ServiceRegistry].([]interface{})[0].(map[string]interface{})["credentials"].(map[string]interface{})
+  service.ServerURI = registryCred["uri"].(string)+"/eureka"
+  service.ClientSecret = registryCred["client_secret"].(string)
+  service.ClientID = registryCred["client_id"].(string)
+  service.TokenURI = registryCred["access_token_uri"].(string)
+
+  fmt.Println("serverURI",service.ServerURI)
+  fmt.Println("clientSecret",service.ClientSecret)
+  fmt.Println("clientID",service.ClientID)
+  fmt.Println("tokenURI",service.TokenURI)
+
+  return service,nil
+}
+
+func GetClientSCS(skip_ssl bool) *Client {
+
+  serviceCred,err := getServiceInfo()
+  if err!=nil {
+    fmt.Println("Error getting CF Service Inst env",err)
+  }
+
+  oAuth2Options := Oauth2ClientCredentials(serviceCred.ClientID, serviceCred.ClientSecret, serviceCred.TokenURI)
+  var tlsOption Option
+  if skip_ssl == true {
+    tlsOption = TLSConfig(&tls.Config{InsecureSkipVerify: true})
+  }
+
+  c := NewClient([]string{serviceCred.ServerURI},oAuth2Options,tlsOption)
+
+  if c==nil {
+    errMsg := "Error creating HTTP client"
+    fmt.Println(errMsg)
+    return nil
+  }
+
+  //Use this block to test successful connectivity to SCS server
+  /*regApps,err:=c.Apps()
+  if err!=nil {
+  fmt.Println("Error getting list of apps:",err)
   return nil
+  }
+  fmt.Println("No of apps: ",len(regApps))
+  */
+
+  return c
+}
+
+func RegisterSCS(skip_ssl bool) error {
+  fmt.Println("Getting HTTP Client for SCS")
+
+  c:=GetClientSCS(skip_ssl)
+
+  _,regInstance,err:=getAppInstanceInfo()
+  if err!=nil {
+    fmt.Println("Error getting CF app env",err)
+    return err
+  }
+
+  fmt.Println("Registering application",regInstance.AppName,"/",regInstance.ID)
+  err= c.Register(regInstance)
+  if err!=nil {
+    fmt.Println("Error registering app:",err)
+    return err
+  }
+
+  return nil
+}
+
+func SendHearbeatSCS(skip_ssl bool) {
+  fmt.Println("Getting HTTP Client for SCS")
+
+  c:=GetClientSCS(skip_ssl)
+
+  _,regInstance,err:=getAppInstanceInfo()
+  if err!=nil {
+    fmt.Println("Error getting CF app env",err)
+    return
+  }
+
+  for {
+    fmt.Println("Sending Heartbeat for",regInstance.AppName,"/",regInstance.ID)
+    err = c.Heartbeat(regInstance)
+    if err!=nil {
+      fmt.Println("Error sending Heartbeat:",err)
+      return
+    }
+    time.Sleep(time.Second * 30)
+  }
+
 }
